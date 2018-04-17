@@ -10,6 +10,8 @@
 #import "SDTestCase.h"
 #import <SDWebImage/SDWebImageDownloader.h>
 #import <SDWebImage/SDWebImageDownloaderOperation.h>
+#import <SDWebImage/SDWebImageCodersManager.h>
+#import "SDWebImageTestDecoder.h"
 
 /**
  *  Category for SDWebImageDownloader so we can access the operationClass
@@ -46,6 +48,10 @@
     return nil;
 }
 
+- (BOOL)cancel:(id)token {
+    return YES;
+}
+
 @end
 
 
@@ -59,6 +65,7 @@
 - (void)test01ThatSharedDownloaderIsNotEqualToInitDownloader {
     SDWebImageDownloader *downloader = [[SDWebImageDownloader alloc] init];
     expect(downloader).toNot.equal([SDWebImageDownloader sharedDownloader]);
+    [downloader invalidateSessionAndCancel:YES];
 }
 
 - (void)test02ThatByDefaultDownloaderSetsTheAcceptHTTPHeader {
@@ -78,7 +85,7 @@
 
 - (void)test04ThatASimpleDownloadWorks {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Simple download"];
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage004.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     [[SDWebImageDownloader sharedDownloader] downloadImageWithURL:imageURL options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
         if (image && data && !error && finished) {
             [expectation fulfill];
@@ -143,7 +150,7 @@
 
 - (void)test09ThatProgressiveJPEGWorks {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Progressive JPEG download"];
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage009.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     [[SDWebImageDownloader sharedDownloader] downloadImageWithURL:imageURL options:SDWebImageDownloaderProgressiveDownload progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
         if (image && data && !error && finished) {
             [expectation fulfill];
@@ -173,7 +180,7 @@
 - (void)test11ThatCancelWorks {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Cancel"];
     
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage011.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     SDWebImageDownloadToken *token = [[SDWebImageDownloader sharedDownloader]
                                       downloadImageWithURL:imageURL options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
                                           XCTFail(@"Should not get here");
@@ -183,7 +190,7 @@
     [[SDWebImageDownloader sharedDownloader] cancel:token];
     
     // doesn't cancel immediately - since it uses dispatch async
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kMinDelayNanosecond), dispatch_get_main_queue(), ^{
         expect([SDWebImageDownloader sharedDownloader].currentDownloadCount).to.equal(0);
         [expectation fulfill];
     });
@@ -193,7 +200,7 @@
 
 - (void)test12ThatWeCanUseAnotherSessionForEachDownloadOperation {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Owned session"];
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage012.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:imageURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
     request.HTTPShouldUsePipelining = YES;
@@ -219,7 +226,7 @@
 
 - (void)test13ThatDownloadCanContinueWhenTheAppEntersBackground {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Simple download"];
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage013.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     [[SDWebImageDownloader sharedDownloader] downloadImageWithURL:imageURL options:SDWebImageDownloaderContinueInBackground progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
         if (image && data && !error && finished) {
             [expectation fulfill];
@@ -231,8 +238,8 @@
 }
 
 - (void)test14ThatPNGWorks {
-    XCTestExpectation *expectation = [self expectationWithDescription:@"WEBP"];
-    NSURL *imageURL = [NSURL URLWithString:@"https://nr-platform.s3.amazonaws.com/uploads/platform/published_extension/branding_icon/275/AmazonS3.png"];
+    XCTestExpectation *expectation = [self expectationWithDescription:@"PNG"];
+    NSURL *imageURL = [NSURL URLWithString:kTestPNGURL];
     [[SDWebImageDownloader sharedDownloader] downloadImageWithURL:imageURL options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
         if (image && data && !error && finished) {
             [expectation fulfill];
@@ -256,6 +263,21 @@
     [self waitForExpectationsWithCommonTimeout];
 }
 
+- (void)test16ThatProgressiveWebPWorks {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Progressive WebP download"];
+    NSURL *imageURL = [NSURL URLWithString:@"http://www.ioncannon.net/wp-content/uploads/2011/06/test9.webp"];
+    [[SDWebImageDownloader sharedDownloader] downloadImageWithURL:imageURL options:SDWebImageDownloaderProgressiveDownload progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
+        if (image && data && !error && finished) {
+            [expectation fulfill];
+        } else if (finished) {
+            XCTFail(@"Something went wrong");
+        } else {
+            // progressive updates
+        }
+    }];
+    [self waitForExpectationsWithCommonTimeout];
+}
+
 /**
  *  Per #883 - Fix multiple requests for same image and then canceling one
  *  Old SDWebImage (3.x) could not handle correctly multiple requests for the same image + cancel
@@ -265,7 +287,7 @@
 - (void)test20ThatDownloadingSameURLTwiceAndCancellingFirstWorks {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Correct image downloads"];
     
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage020.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     
     SDWebImageDownloadToken *token1 = [[SDWebImageDownloader sharedDownloader]
                                        downloadImageWithURL:imageURL
@@ -303,7 +325,7 @@
 - (void)test21ThatCancelingDownloadThenRequestingAgainWorks {
     XCTestExpectation *expectation = [self expectationWithDescription:@"Correct image downloads"];
     
-    NSURL *imageURL = [NSURL URLWithString:@"http://s3.amazonaws.com/fast-image-cache/demo-images/FICDDemoImage021.jpg"];
+    NSURL *imageURL = [NSURL URLWithString:kTestJpegURL];
     
     SDWebImageDownloadToken *token1 = [[SDWebImageDownloader sharedDownloader]
                                        downloadImageWithURL:imageURL
@@ -331,6 +353,36 @@
     expect(token2).toNot.beNil();
     
     [self waitForExpectationsWithCommonTimeout];
+}
+
+- (void)test22ThatCustomDecoderWorksForImageDownload {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Custom decoder for SDWebImageDownloader not works"];
+    SDWebImageDownloader *downloader = [[SDWebImageDownloader alloc] init];
+    SDWebImageTestDecoder *testDecoder = [[SDWebImageTestDecoder alloc] init];
+    [[SDWebImageCodersManager sharedInstance] addCoder:testDecoder];
+    NSURL * testImageURL = [[NSBundle bundleForClass:[self class]] URLForResource:@"TestImage" withExtension:@"png"];
+    
+    // Decoded result is JPEG
+    NSString *testJPEGImagePath = [[NSBundle bundleForClass:[self class]] pathForResource:@"TestImage" ofType:@"jpg"];
+    UIImage *testJPEGImage = [UIImage imageWithContentsOfFile:testJPEGImagePath];
+    
+    [downloader downloadImageWithURL:testImageURL options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
+        NSData *data1 = UIImagePNGRepresentation(testJPEGImage);
+        NSData *data2 = UIImagePNGRepresentation(image);
+        if (![data1 isEqualToData:data2]) {
+            XCTFail(@"The image data is not equal to cutom decoder, check -[SDWebImageTestDecoder decodedImageWithData:]");
+        }
+        NSString *str1 = @"TestDecompress";
+        NSString *str2 = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if (![str1 isEqualToString:str2]) {
+            XCTFail(@"The image data is not modified by the custom decoder, check -[SDWebImageTestDecoder decompressedImageWithImage:data:options:]");
+        }
+        [[SDWebImageCodersManager sharedInstance] removeCoder:testDecoder];
+        [expectation fulfill];
+    }];
+    
+    [self waitForExpectationsWithCommonTimeout];
+    [downloader invalidateSessionAndCancel:YES];
 }
 
 @end
